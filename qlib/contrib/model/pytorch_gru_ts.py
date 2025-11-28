@@ -52,7 +52,9 @@ class GRU(Model):
         loss="mse",
         optimizer="adam",
         n_jobs=10,
-        GPU=0,
+        GPU=0,  # Kept for backward compatibility
+        gpus=[0],  # New: list of GPU IDs for multi-GPU training
+        use_amp=False,  # New: enable Automatic Mixed Precision training
         seed=None,
         **kwargs,
     ):
@@ -72,9 +74,24 @@ class GRU(Model):
         self.early_stop = early_stop
         self.optimizer = optimizer.lower()
         self.loss = loss
-        self.device = torch.device("cuda:%d" % (GPU) if torch.cuda.is_available() and GPU >= 0 else "cpu")
+        
+        # Handle GPU configuration
+        # Support both old GPU parameter and new gpus list
+        if isinstance(gpus, list):
+            self.gpus = gpus
+        else:
+            # Fallback to old GPU parameter
+            self.gpus = [GPU] if GPU >= 0 else []
+        
+        # Set device to first GPU in list, or CPU if no GPU
+        if torch.cuda.is_available() and len(self.gpus) > 0:
+            self.device = torch.device(f"cuda:{self.gpus[0]}")
+        else:
+            self.device = torch.device("cpu")
+        
         self.n_jobs = n_jobs
         self.seed = seed
+        self.use_amp = use_amp
 
         self.logger.info(
             "GRU parameters setting:"
@@ -91,7 +108,9 @@ class GRU(Model):
             "\nloss_type : {}"
             "\ndevice : {}"
             "\nn_jobs : {}"
+            "\nvisible_GPUs : {}"
             "\nuse_GPU : {}"
+            "\nuse_AMP : {}"
             "\nseed : {}".format(
                 d_feat,
                 hidden_size,
@@ -106,7 +125,9 @@ class GRU(Model):
                 loss,
                 self.device,
                 n_jobs,
+                self.gpus,
                 self.use_gpu,
+                self.use_amp,
                 seed,
             )
         )
@@ -121,18 +142,32 @@ class GRU(Model):
             num_layers=self.num_layers,
             dropout=self.dropout,
         )
+        
+        # Move model to device
+        self.GRU_model.to(self.device)
+        
+        # Wrap with DataParallel if multiple GPUs
+        if len(self.gpus) > 1:
+            self.GRU_model = nn.DataParallel(self.GRU_model, device_ids=self.gpus)
+            self.logger.info(f"Using DataParallel with {len(self.gpus)} GPUs")
+        
         self.logger.info("model:\n{:}".format(self.GRU_model))
         self.logger.info("model size: {:.4f} MB".format(count_parameters(self.GRU_model)))
-
+        
+        # Initialize optimizer
         if optimizer.lower() == "adam":
             self.train_optimizer = optim.Adam(self.GRU_model.parameters(), lr=self.lr)
         elif optimizer.lower() == "gd":
             self.train_optimizer = optim.SGD(self.GRU_model.parameters(), lr=self.lr)
         else:
             raise NotImplementedError("optimizer {} is not supported!".format(optimizer))
-
+        
+        # Initialize GradScaler for AMP if enabled
+        if self.use_amp:
+            self.scaler = torch.cuda.amp.GradScaler()
+            self.logger.info("AMP (Automatic Mixed Precision) training enabled")
+        
         self.fitted = False
-        self.GRU_model.to(self.device)
 
     @property
     def use_gpu(self):
@@ -167,14 +202,27 @@ class GRU(Model):
         for data, weight in data_loader:
             feature = data[:, :, 0:-1].to(self.device)
             label = data[:, -1, -1].to(self.device)
-
-            pred = self.GRU_model(feature.float())
-            loss = self.loss_fn(pred, label, weight.to(self.device))
-
-            self.train_optimizer.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_value_(self.GRU_model.parameters(), 3.0)
-            self.train_optimizer.step()
+            
+            # Use AMP if enabled
+            if self.use_amp:
+                with torch.cuda.amp.autocast():
+                    pred = self.GRU_model(feature.float())
+                    loss = self.loss_fn(pred, label, weight.to(self.device))
+                
+                self.train_optimizer.zero_grad()
+                self.scaler.scale(loss).backward()
+                self.scaler.unscale_(self.train_optimizer)
+                torch.nn.utils.clip_grad_value_(self.GRU_model.parameters(), 3.0)
+                self.scaler.step(self.train_optimizer)
+                self.scaler.update()
+            else:
+                pred = self.GRU_model(feature.float())
+                loss = self.loss_fn(pred, label, weight.to(self.device))
+                
+                self.train_optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_value_(self.GRU_model.parameters(), 3.0)
+                self.train_optimizer.step()
 
     def test_epoch(self, data_loader):
         self.GRU_model.eval()

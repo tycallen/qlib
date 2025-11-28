@@ -1,13 +1,13 @@
 qlib_init:
     provider_uri: "~/.qlib/qlib_data/cn_data"
     region: cn
-market: &market csi300
+market: &market all
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
-    start_time: 2008-01-01
-    end_time: 2020-08-01
-    fit_start_time: 2008-01-01
-    fit_end_time: 2014-12-31
+    start_time: 2000-01-01
+    end_time: 2025-09-05
+    fit_start_time: 2000-01-01
+    fit_end_time: 2023-12-31
     instruments: *market
     infer_processors:
         - class: FilterCol
@@ -39,8 +39,8 @@ port_analysis_config: &port_analysis_config
             topk: 50
             n_drop: 5
     backtest:
-        start_time: 2017-01-01
-        end_time: 2020-08-01
+        start_time: 2024-01-01
+        end_time: 2025-09-05
         account: 100000000
         benchmark: *benchmark
         exchange_kwargs:
@@ -59,13 +59,14 @@ task:
             num_layers: 2
             dropout: 0.7
             n_epochs: 200
-            lr: 1e-4
-            early_stop: 10
+            lr: 1e-3
+            early_stop: 70
             metric: loss
             loss: mse
             base_model: LSTM
-            model_path: "benchmarks/LSTM/csi300_lstm_ts.pkl"
+            model_path: "mlruns/686249546704553370/2ee5b9c2d8f2420e8cb39aa84b35546e/artifacts/lstm_weights.pth"
             GPU: 0
+            gpus: [0, 1, 2] 
     dataset:
         class: TSDatasetH
         module_path: qlib.data.dataset
@@ -75,9 +76,9 @@ task:
                 module_path: qlib.contrib.data.handler
                 kwargs: *data_handler_config
             segments:
-                train: [2008-01-01, 2014-12-31]
-                valid: [2015-01-01, 2016-12-31]
-                test: [2017-01-01, 2020-08-01]
+                train: [2000-01-01, 2020-12-31]  # 缩短到6年，减少内存占用
+                valid: [2021-01-01, 2023-12-31]
+                test: [2024-01-01, 2025-09-05]
             step_len: 20
     record: 
         - class: SignalRecord

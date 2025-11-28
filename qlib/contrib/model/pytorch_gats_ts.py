@@ -72,7 +72,9 @@ class GATs(Model):
         base_model="GRU",
         model_path=None,
         optimizer="adam",
-        GPU=0,
+        GPU=0,  # Kept for backward compatibility
+        gpus=[0],  # New: list of GPU IDs for multi-GPU training
+        use_amp=False,  # New: enable Automatic Mixed Precision training
         n_jobs=10,
         seed=None,
         **kwargs,
@@ -94,9 +96,22 @@ class GATs(Model):
         self.loss = loss
         self.base_model = base_model
         self.model_path = model_path
-        self.device = torch.device("cuda:%d" % (GPU) if torch.cuda.is_available() and GPU >= 0 else "cpu")
+        
+        # Handle GPU configuration
+        if isinstance(gpus, list):
+            self.gpus = gpus
+        else:
+            self.gpus = [GPU] if GPU >= 0 else []
+        
+        # Set device
+        if torch.cuda.is_available() and len(self.gpus) > 0:
+            self.device = torch.device(f"cuda:{self.gpus[0]}")
+        else:
+            self.device = torch.device("cpu")
+        
         self.n_jobs = n_jobs
         self.seed = seed
+        self.use_amp = use_amp
 
         self.logger.info(
             "GATs parameters setting:"
@@ -112,8 +127,9 @@ class GATs(Model):
             "\nloss_type : {}"
             "\nbase_model : {}"
             "\nmodel_path : {}"
-            "\nvisible_GPU : {}"
+            "\nvisible_GPUs : {}"
             "\nuse_GPU : {}"
+            "\nuse_AMP : {}"
             "\nseed : {}".format(
                 d_feat,
                 hidden_size,
@@ -127,8 +143,9 @@ class GATs(Model):
                 loss,
                 base_model,
                 model_path,
-                GPU,
+                self.gpus,
                 self.use_gpu,
+                self.use_amp,
                 seed,
             )
         )
@@ -144,18 +161,31 @@ class GATs(Model):
             dropout=self.dropout,
             base_model=self.base_model,
         )
+        
+        # Move model to device
+        self.GAT_model.to(self.device)
+        
+        # Wrap with DataParallel if multiple GPUs
+        if len(self.gpus) > 1:
+            self.GAT_model = nn.DataParallel(self.GAT_model, device_ids=self.gpus)
+            self.logger.info(f"Using DataParallel with {len(self.gpus)} GPUs")
+        
         self.logger.info("model:\n{:}".format(self.GAT_model))
-        self.logger.info("model size: {:.4f} MB".format(count_parameters(self.GAT_model)))
-
+        self.logger.info("model size: {:.4f} MB". format(count_parameters(self.GAT_model)))
+        
         if optimizer.lower() == "adam":
             self.train_optimizer = optim.Adam(self.GAT_model.parameters(), lr=self.lr)
         elif optimizer.lower() == "gd":
             self.train_optimizer = optim.SGD(self.GAT_model.parameters(), lr=self.lr)
         else:
             raise NotImplementedError("optimizer {} is not supported!".format(optimizer))
-
+        
+        # Initialize GradScaler for AMP if enabled
+        if self.use_amp:
+            self.scaler = torch.cuda.amp.GradScaler()
+            self.logger.info("AMP (Automatic Mixed Precision) training enabled")
+        
         self.fitted = False
-        self.GAT_model.to(self.device)
 
     @property
     def use_gpu(self):
@@ -197,17 +227,31 @@ class GATs(Model):
         self.GAT_model.train()
 
         for data in data_loader:
-            data = data.squeeze()
-            feature = data[:, :, 0:-1].to(self.device)
-            label = data[:, -1, -1].to(self.device)
-
-            pred = self.GAT_model(feature.float())
-            loss = self.loss_fn(pred, label)
-
-            self.train_optimizer.zero_grad()
-            loss.backward()
-            torch.nn.utils.clip_grad_value_(self.GAT_model.parameters(), 3.0)
-            self.train_optimizer.step()
+            if self.use_amp:
+                with torch.cuda.amp.autocast():
+                    data = data.squeeze()
+                    feature = data[:, :, 0:-1].to(self.device)
+                    label = data[:, -1, -1].to(self.device)
+                    pred = self.GAT_model(feature.float())
+                    loss = self.loss_fn(pred, label)
+                
+                self.train_optimizer.zero_grad()
+                self.scaler.scale(loss).backward()
+                self.scaler.unscale_(self.train_optimizer)
+                torch.nn.utils.clip_grad_value_(self.GAT_model.parameters(), 3.0)
+                self.scaler.step(self.train_optimizer)
+                self.scaler.update()
+            else:
+                data = data.squeeze()
+                feature = data[:, :, 0:-1].to(self.device)
+                label = data[:, -1, -1].to(self.device)
+                pred = self.GAT_model(feature.float())
+                loss = self.loss_fn(pred, label)
+                
+                self.train_optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_value_(self.GAT_model.parameters(), 3.0)
+                self.train_optimizer.step()
 
     def test_epoch(self, data_loader):
         self.GAT_model.eval()
