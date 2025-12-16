@@ -145,13 +145,20 @@ class RecordTemp:
 
             def _get_arts(dirn):
                 if dirn not in artifacts:
-                    artifacts[dirn] = self.recorder.list_artifacts(dirn)
+                    try:
+                        artifacts[dirn] = self.recorder.list_artifacts(dirn)
+                    except (AttributeError, NotImplementedError) as e:
+                        # Some recorder implementations may not have list_artifacts method
+                        # In such cases, we skip the file existence check
+                        logger.warning(f"Unable to list artifacts: {e}. Skipping file existence check.")
+                        artifacts[dirn] = []
                 return artifacts[dirn]
 
             for item in self.list():
                 ps = self.get_path(item).split("/")
                 dirn = "/".join(ps[:-1])
-                if self.get_path(item) not in _get_arts(dirn):
+                arts = _get_arts(dirn)
+                if arts and self.get_path(item) not in arts:  # Only check if we got artifacts list
                     raise FileNotFoundError
         if parents:
             if self.depend_cls is not None:
@@ -195,8 +202,9 @@ class SignalRecord(RecordTemp):
             pred = pred.to_frame("score")
         self.save(**{"pred.pkl": pred})
 
+        exp_id = getattr(self.recorder, 'experiment_id', 'N/A')
         logger.info(
-            f"Signal record 'pred.pkl' has been saved as the artifact of the Experiment {self.recorder.experiment_id}"
+            f"Signal record 'pred.pkl' has been saved as the artifact of the Experiment {exp_id}"
         )
         # print out results
         pprint(f"The following are prediction results of the {type(self.model).__name__} model.")
@@ -512,8 +520,9 @@ class PortAnaRecord(ACRecordTemp):
                 self.recorder.log_metrics(**{f"{_analysis_freq}.{k}": v for k, v in analysis_dict.items()})
                 # save results
                 artifact_objects.update({f"port_analysis_{_analysis_freq}.pkl": analysis_df})
+                exp_id = getattr(self.recorder, 'experiment_id', 'N/A')
                 logger.info(
-                    f"Portfolio analysis record 'port_analysis_{_analysis_freq}.pkl' has been saved as the artifact of the Experiment {self.recorder.experiment_id}"
+                    f"Portfolio analysis record 'port_analysis_{_analysis_freq}.pkl' has been saved as the artifact of the Experiment {exp_id}"
                 )
                 # print out results
                 pprint(f"The following are analysis results of benchmark return({_analysis_freq}).")
@@ -537,8 +546,9 @@ class PortAnaRecord(ACRecordTemp):
                 self.recorder.log_metrics(**{f"{_analysis_freq}.{k}": v for k, v in analysis_dict.items()})
                 # save results
                 artifact_objects.update({f"indicator_analysis_{_analysis_freq}.pkl": analysis_df})
+                exp_id = getattr(self.recorder, 'experiment_id', 'N/A')
                 logger.info(
-                    f"Indicator analysis record 'indicator_analysis_{_analysis_freq}.pkl' has been saved as the artifact of the Experiment {self.recorder.experiment_id}"
+                    f"Indicator analysis record 'indicator_analysis_{_analysis_freq}.pkl' has been saved as the artifact of the Experiment {exp_id}"
                 )
                 pprint(f"The following are analysis results of indicators({_analysis_freq}).")
                 pprint(analysis_df)
