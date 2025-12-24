@@ -72,9 +72,9 @@ task:
             # ========================================
             # GPU优化参数（关键！）
             # ========================================
-            batch_strategy: "fixed"          # 使用固定batch size（提升GPU利用率）
-            fixed_batch_size: 5000           # 平衡性能和显存：每GPU约4-5GB（避免OOM）
-            gradient_accumulation_steps: 1   # 有效batch = 5000
+            batch_strategy: "daily"          # 保持时序结构（对LSTM/GRU至关重要！）
+            fixed_batch_size: 5000           # daily模式下此参数无效
+            gradient_accumulation_steps: 4   # 梯度累积模拟更大batch
 
             # DataLoader优化
             n_jobs: 32                       # DataLoader worker数量
