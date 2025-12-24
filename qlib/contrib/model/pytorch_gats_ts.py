@@ -27,8 +27,13 @@ class DailyBatchSampler(Sampler):
     def __init__(self, data_source):
         self.data_source = data_source
         # calculate number of samples in each batch
+        if hasattr(self.data_source, "get_index"):
+            index = self.data_source.get_index()
+        else:
+            index = self.data_source.index
+
         self.daily_count = (
-            pd.Series(index=self.data_source.get_index()).groupby("datetime", group_keys=False).size().values
+            pd.Series(index=index).groupby("datetime", group_keys=False).size().values
         )
         self.daily_index = np.roll(np.cumsum(self.daily_count), 1)  # calculate begin index of each batch
         self.daily_index[0] = 0
@@ -361,9 +366,20 @@ class GATs(Model):
             raise ValueError("model is not fitted yet!")
 
         dl_test = dataset.prepare("test", col_set=["feature", "label"], data_key=DataHandlerLP.DK_I)
-        dl_test.config(fillna_type="ffill+bfill")
-        sampler_test = DailyBatchSampler(dl_test)
-        test_loader = DataLoader(dl_test, sampler=sampler_test, num_workers=self.n_jobs)
+        
+        # Check if dl_test is a DataFrame or TSDataSampler
+        if isinstance(dl_test, pd.DataFrame):
+            # For DataFrame: apply fillna and use values
+            dl_test = dl_test.fillna(method="ffill").fillna(method="bfill")
+            sampler_test = DailyBatchSampler(dl_test)
+            test_loader = DataLoader(dl_test.values, sampler=sampler_test, num_workers=self.n_jobs)
+            index = dl_test.index
+        else:
+            # For TSDataSampler or similar objects: use directly
+            sampler_test = DailyBatchSampler(dl_test)
+            test_loader = DataLoader(dl_test, sampler=sampler_test, num_workers=self.n_jobs)
+            index = dl_test.get_index()
+        
         self.GAT_model.eval()
         preds = []
 
@@ -376,7 +392,7 @@ class GATs(Model):
 
             preds.append(pred)
 
-        return pd.Series(np.concatenate(preds), index=dl_test.get_index())
+        return pd.Series(np.concatenate(preds), index=index)
 
 
 class GATModel(nn.Module):

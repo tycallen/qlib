@@ -1,52 +1,49 @@
-# https://github.com/github/gitignore/blob/master/Python.gitignore
+# Python
 __pycache__/
-
-*.pyc
-*.pyd
+*.py[cod]
+*$py.class
 *.so
-*.ipynb
-.ipynb_checkpoints
-_build
-build/
-dist/
-
-*.pkl
-*.hd5
-*.csv
-
-.env
-.vim
-.nvimrc
-.vscode
-
-qlib/VERSION.txt
-qlib/data/_libs/expanding.cpp
-qlib/data/_libs/rolling.cpp
-examples/estimator/estimator_example/
-examples/rl/data/
-examples/rl/checkpoints/
-examples/rl/outputs/
-examples/rl_order_execution/data/
-examples/rl_order_execution/outputs/
-
+.Python
+env/
+venv/
+ENV/
 *.egg-info/
+dist/
+build/
 
-# test related
-test-output.xml
-.output
-.data
+# Jupyter Notebook
+.ipynb_checkpoints
 
-# special software
+# Training outputs
+training.log
+training_*.log
+*.pth
+checkpoints/
 mlruns/
 
-tags
+# Data archives
+*.tar.gz
+20251215_best_data.tar.gz
 
-.pytest_cache/
-.mypy_cache/
+# Reports
+report.html
+*.html
+
+# Temporary files
+.DS_Store
+._*
+--*
+
+# Archive
+archive/
+
+# IDEs
 .vscode/
-
-*.swp
-
-./pretrain
 .idea/
-.aider*
+*.swp
+*.swo
+*~
+
+# Test files
+verify_batch_consistency.py
+check_data_range.py

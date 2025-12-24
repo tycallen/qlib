@@ -5,7 +5,7 @@ market: &market all
 benchmark: &benchmark SH000300
 data_handler_config: &data_handler_config
     start_time: 2000-01-01
-    end_time: 2025-08-07
+    end_time: 2025-12-16
     fit_start_time: 2000-01-01
     fit_end_time: 2020-12-31
     instruments: *market
@@ -40,7 +40,7 @@ port_analysis_config: &port_analysis_config
             n_drop: 5
     backtest:
         start_time: 2024-01-01
-        end_time: 2025-09-05
+        end_time: 2025-12-16
         account: 100000000
         benchmark: *benchmark
         exchange_kwargs:
@@ -58,16 +58,34 @@ task:
             hidden_size: 64
             num_layers: 3
             dropout: 0.7
-            n_epochs: 200
+            n_epochs: 500
             lr: 0.001
-            early_stop: 30
+            early_stop: 60
             metric: loss
             loss: mse
             base_model: LSTM
             use_amp: True
             # model_path: "checkpoints/lstm_allstock_alpha158_ts.pth"
-            GPU: 3
-            gpus: [0,1,2] 
+            GPU: 0
+            gpus: [0, 1]                     # 只使用GPU 0和1（GPU 2显存被占用）
+
+            # ========================================
+            # GPU优化参数（关键！）
+            # ========================================
+            batch_strategy: "fixed"          # 使用固定batch size（提升GPU利用率）
+            fixed_batch_size: 5000           # 平衡性能和显存：每GPU约4-5GB（避免OOM）
+            gradient_accumulation_steps: 1   # 有效batch = 5000
+
+            # DataLoader优化
+            n_jobs: 32                       # DataLoader worker数量
+            pin_memory: True                 # 加速CPU→GPU传输
+            persistent_workers: True         # 减少worker重建开销
+            prefetch_factor: 4               # 预取4个batch
+
+            # Checkpoint管理
+            checkpoint_dir: "./checkpoints/gats_alpha158_optimized"
+            save_checkpoint_interval: 10     # 每10个epoch保存一次
+            use_mlflow: True                 # 启用MLflow跟踪 
     dataset:
         class: TSDatasetH
         module_path: qlib.data.dataset
@@ -79,7 +97,7 @@ task:
             segments:
                 train: [2000-01-01, 2020-12-31]  
                 valid: [2021-01-01, 2023-12-31]
-                test: [2024-01-01, 2025-08-07]
+                test: [2024-01-01, 2025-12-16]
             step_len: 20
     record: 
         - class: SignalRecord

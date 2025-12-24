@@ -168,21 +168,6 @@ def train_gats_with_enhancements(config=None):
             # Save predictions
             R.save_objects(**{"pred.pkl": pred})
 
-            # Save model weights to MLflow artifacts
-            import os
-            if os.path.exists(save_path):
-                R.save_objects(local_path=save_path)
-                print(f"✓ Model weights saved to MLflow: {save_path}")
-
-            # Optionally save checkpoints directory if it exists
-            checkpoint_dir = model_config.get('checkpoint_dir', './checkpoints')
-            if os.path.exists(checkpoint_dir):
-                # Save only the best checkpoint to reduce storage
-                best_checkpoint = os.path.join(checkpoint_dir, "best_checkpoint.pth")
-                if os.path.exists(best_checkpoint):
-                    R.save_objects(local_path=best_checkpoint, artifact_path="checkpoints")
-                    print(f"✓ Best checkpoint saved to MLflow: {best_checkpoint}")
-
             # Get recorder object
             recorder = R.get_recorder()
 
